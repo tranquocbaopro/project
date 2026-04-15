@@ -1,0 +1,59 @@
+name: Build Unity IPA (LFS & Zip Fix)
+on: [workflow_dispatch, push]
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          lfs: true # Đảm bảo tải file lớn nếu bạn dùng Git LFS
+
+      - name: Extract Library
+        run: |
+          # Vào thư mục Libraries và giải nén file xịn
+          cd Libraries/
+          
+          # Tìm mọi file zip bắt đầu bằng libiPhone-lib và giải nén
+          unzip -o "libiPhone-lib*" || 7za x "libiPhone-lib*" -y
+          
+          # Kiểm tra xem file giải nén xong có chuẩn không (phải hiện current ar archive)
+          echo "--- KIEM TRA DINH DANG FILE SAU GIAI NEN ---"
+          file libiPhone-lib.a
+
+      - name: Build Unity-iPhone
+        run: |
+          # Build dự án Unity bằng file xcodeproj ở thư mục gốc
+          xcodebuild build \
+            -project "Unity-iPhone.xcodeproj" \
+            -scheme "Unity-iPhone" \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath $PWD/DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            AD_HOC_CODE_SIGNING_ALLOWED=YES
+
+      - name: Create IPA (Payload)
+        run: |
+          mkdir -p build/Payload
+          # Tìm file .app chính chủ của Unity trong folder Release-iphoneos
+          APP_PATH=$(find $PWD/DerivedData -name "*.app" -type d | grep "Release-iphoneos" | head -n 1)
+          
+          if [ -z "$APP_PATH" ]; then
+            echo "KHÔNG TÌM THẤY FILE .APP ĐỂ ĐÓNG GÓI!"
+            exit 1
+          fi
+          
+          echo "Đang đóng gói app từ: $APP_PATH"
+          cp -r "$APP_PATH" build/Payload/
+          cd build
+          zip -r Unity_Project_Unsigned.ipa Payload
+          
+      - name: Upload IPA Result
+        uses: actions/upload-artifact@v4
+        with:
+          name: iOS-Unity-App-Ready
+          path: build/Unity_Project_Unsigned.ipa
